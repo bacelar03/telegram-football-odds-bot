@@ -128,6 +128,57 @@ def save_prediction(match_id, odds):
     conn.commit()
     conn.close()
 
+def get_all_teams_ranking():
+    """Retorna ranking de todos os times por força"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Obter todos os times únicos
+    cursor.execute('''
+        SELECT DISTINCT home_team FROM matches WHERE status = 'FINISHED'
+        UNION
+        SELECT DISTINCT away_team FROM matches WHERE status = 'FINISHED'
+    ''')
+    
+    teams = cursor.fetchall()
+    conn.close()
+    
+    team_stats_list = []
+    
+    for team in teams:
+        team_name = team[0]
+        stats = get_team_stats(team_name)
+        
+        # Verificar se há dados válidos (não None)
+        if stats['home'] and stats['away']:
+            home_gf, home_ga = stats['home']
+            away_gf, away_ga = stats['away']
+            
+            # Validar valores
+            if home_gf is None or home_ga is None or away_gf is None or away_ga is None:
+                continue
+            
+            # Calcular força: (gols a favor - gols contra) / 2
+            home_strength = (home_gf - home_ga) / 2
+            away_strength = (away_gf - away_ga) / 2
+            total_strength = (home_strength + away_strength) / 2
+            
+            team_stats_list.append({
+                'name': team_name,
+                'strength': total_strength,
+                'home_gf': home_gf,
+                'home_ga': home_ga,
+                'away_gf': away_gf,
+                'away_ga': away_ga
+            })
+    
+    # Ordenar por força (decrescente)
+    team_stats_list.sort(key=lambda x: x['strength'], reverse=True)
+    
+    print(f"DEBUG: {len(team_stats_list)} times no ranking")
+    
+    return team_stats_list
+
 # Inicializar ao importar
 if not os.path.exists(DB_PATH):
     init_database()
