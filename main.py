@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from data_fetcher import get_tomorrow_matches, format_matches_for_telegram, sync_matches_to_database
-from database import init_database
+from database import init_database, get_team_stats
 from ml_model import predictor
 
 # Carregar variáveis de .env
@@ -26,6 +26,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/start - Iniciar\n"
         "/tomorrow - Jogos de amanhã\n"
         "/odds - Previsão de odds\n"
+        "/stats <time> - Estatísticas de um time\n"
+        "/best - Melhores odds\n"
     )
 
 async def tomorrow_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -62,6 +64,88 @@ async def predict_odds(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(message, parse_mode="Markdown")
 
+async def team_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /stats <time> - Mostra estatísticas de um time"""
+    
+    if not context.args:
+        await update.message.reply_text(
+            "❌ Uso: `/stats Nome_do_Time`\n"
+            "Exemplo: `/stats Flamengo`",
+            parse_mode="Markdown"
+        )
+        return
+    
+    team_name = " ".join(context.args)
+    stats = get_team_stats(team_name)
+    
+    if not stats['home'] or not stats['away']:
+        await update.message.reply_text(f"❌ Nenhum histórico encontrado para {team_name}")
+        return
+    
+    home_gf, home_ga = stats['home']
+    away_gf, away_ga = stats['away']
+    
+    message = f"📊 **ESTATÍSTICAS - {team_name}**\n\n"
+    message += f"🏠 **Em Casa:**\n"
+    message += f"  Gols a Favor: {home_gf:.2f}\n"
+    message += f"  Gols contra: {home_ga:.2f}\n"
+    message += f"  Saldo: {home_gf - home_ga:+.2f}\n\n"
+    message += f"🏃 **Fora de Casa:**\n"
+    message += f"  Gols a Favor: {away_gf:.2f}\n"
+    message += f"  Gols contra: {away_ga:.2f}\n"
+    message += f"  Saldo: {away_gf - away_ga:+.2f}\n"
+    
+    await update.message.reply_text(message, parse_mode="Markdown")
+
+async def best_odds(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /best - Mostra as melhores odds do momento"""
+    matches = get_tomorrow_matches()
+    
+    if not matches:
+        await update.message.reply_text("❌ Nenhum jogo disponível.")
+        return
+    
+    # Calcular odds para todos os jogos
+    odds_list = []
+    
+    for match in matches:
+        home_team = match['homeTeam']['name']
+        away_team = match['awayTeam']['name']
+        odds = predictor.predict_odds(home_team, away_team)
+        
+        utc_datetime = match['utcDate']
+        date_str = utc_datetime.split('T')[0]
+        time_str = utc_datetime.split('T')[1][:5]
+        
+        odds_list.append({
+            'home': home_team,
+            'away': away_team,
+            'odds': odds,
+            'date': date_str,
+            'time': time_str
+        })
+    
+    # Encontrar as melhores odds (maiores)
+    best_home = max(odds_list, key=lambda x: x['odds']['home_win'])
+    best_draw = max(odds_list, key=lambda x: x['odds']['draw'])
+    best_away = max(odds_list, key=lambda x: x['odds']['away_win'])
+    
+    message = "🏆 **MELHORES ODDS DO MOMENTO:**\n\n"
+    
+    message += f"🥇 **Maior Odd - Vitória Mandante:**\n"
+    message += f"{best_home['home']} vs {best_home['away']}\n"
+    message += f"Odd: {best_home['odds']['home_win']} ({best_home['date']} {best_home['time']})\n\n"
+    
+    message += f"🥈 **Maior Odd - Empate:**\n"
+    message += f"{best_draw['home']} vs {best_draw['away']}\n"
+    message += f"Odd: {best_draw['odds']['draw']} ({best_draw['date']} {best_draw['time']})\n\n"
+    
+    message += f"🥉 **Maior Odd - Vitória Visitante:**\n"
+    message += f"{best_away['home']} vs {best_away['away']}\n"
+    message += f"Odd: {best_away['odds']['away_win']} ({best_away['date']} {best_away['time']})\n"
+    
+    await update.message.reply_text(message, parse_mode="Markdown")
+
 def main():
     """Iniciar o bot"""
     application = Application.builder().token(TOKEN).build()
@@ -78,6 +162,8 @@ def main():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("tomorrow", tomorrow_matches))
     application.add_handler(CommandHandler("odds", predict_odds))
+    application.add_handler(CommandHandler("stats", team_stats))
+    application.add_handler(CommandHandler("best", best_odds))
     
     # Iniciar polling (escuta mensagens)
     print("✅ Bot iniciado! Pressiona Ctrl+C para parar.")
