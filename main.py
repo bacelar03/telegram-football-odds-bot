@@ -3,6 +3,7 @@ import os
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
+from data_fetcher import get_tomorrow_matches, format_matches_for_telegram
 
 # Carregar variáveis de .env
 load_dotenv()
@@ -25,6 +26,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/odds - Melhores odds\n"
     )
 
+async def tomorrow_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /tomorrow - Mostra jogos de amanhã"""
+    matches = get_tomorrow_matches()
+    message = format_matches_for_telegram(matches)
+    await update.message.reply_text(message, parse_mode="Markdown")
+
 def main():
     """Iniciar o bot"""
     application = Application.builder().token(TOKEN).build()
@@ -32,6 +39,7 @@ def main():
     # Adicionar handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("tomorrow", tomorrow_matches))
     
     # Iniciar polling (escuta mensagens)
     print("✅ Bot iniciado! Pressiona Ctrl+C para parar.")
